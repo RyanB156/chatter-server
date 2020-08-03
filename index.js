@@ -1,4 +1,6 @@
 
+const crypto = require('crypto');
+
 class Message {
   
   constructor(sender, receiver, timestamp, body) {
@@ -130,6 +132,59 @@ app.post('/messages/add', jsonParser, function(req, res) {
   addMessage(participantsCode, j);
 
   return res.status(200).send(JSON.stringify(`Added message successfully`));
+});
+
+
+
+// --- User API calls ---
+
+/**
+ * Register a new user. Expects username, passwordHash, and key in the message body in json format.
+ * 
+ */
+app.post('/users/register', jsonParser, function(req, res) {
+  if ('username' in req.body && 'passwordHash' in req.body && 'key' in req.body) {
+
+    // Ensure that a user with that username does not exist.
+    let users = userAPI.getAll().data;
+    for (index in users) {
+      if (users[index]['username'] === req.body['username']) {
+        console.log(`A user with username ${req.body['username']} already exists`);
+        return res.status(400).send(`A user with username ${req.body['username']} already exists`);
+      }
+    }
+    req.body['sessionKey'] = '';
+    userAPI.add(req.body);
+    return res.status(200).send(`User ${JSON.stringify(req.body)} added successfully`);
+  } else {
+    return res.status(400).send('Users must have a \'username\', \'passwordHash\', and a \'key\'');
+  }
+});
+
+app.post('/users/login', jsonParser, function(req, res) {
+  if ('username' in req.body && 'passwordHash' in req.body) {
+    let users = userAPI.getAll().data;
+    let isSuccessful = false;
+    let reqUser;
+    console.log(req.body);
+    for (index in users) {
+      console.log(users[index]);
+      if (users[index]['username'] === req.body['username'] && users[index]['passwordHash'] == req.body['passwordHash']) {
+        isSuccessful = true;
+        reqUser = users[index];
+      }
+    }
+    if (isSuccessful) {
+      // Generate session key.
+      let sessionKey = crypto.randomBytes(64).toString('hex');
+      reqUser['sessionKey'] = sessionKey;
+      return res.status(200).send({msg: 'User logged in successfully', sessionKey: sessionKey});
+    } else {
+      return res.status(400).send('Either the username or the password entered was invalid');
+    }
+  } else {
+    return res.status(400).send('Users must have a \'username\', \'passwordHash\'');
+  }
 });
 
 /*

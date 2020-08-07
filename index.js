@@ -143,7 +143,7 @@ app.post('/messages/add', jsonParser, function(req, res) {
  * 
  */
 app.post('/users/register', jsonParser, function(req, res) {
-  if ('username' in req.body && 'passwordHash' in req.body && 'key' in req.body) {
+  if ('username' in req.body && 'passwordHash' in req.body && 'publicKey' in req.body) {
 
     // Ensure that a user with that username does not exist.
     let users = userAPI.getAll().data;
@@ -178,7 +178,8 @@ app.post('/users/login', jsonParser, function(req, res) {
       // Generate session key.
       let sessionKey = crypto.randomBytes(64).toString('hex');
       reqUser['sessionKey'] = sessionKey;
-      return res.status(200).send({msg: 'User logged in successfully', sessionKey: sessionKey});
+      userAPI._saveData(users);
+      return res.status(200).send({msg: 'User logged in successfully', sessionKey: sessionKey, publicKey: reqUser['publicKey']});
     } else {
       return res.status(400).send('Either the username or the password entered was invalid');
     }

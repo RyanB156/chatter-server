@@ -26,12 +26,12 @@ app.use(cors());
 let jsonParser = bodyParser.json();
 const server = https.createServer({key: key, cert: cert }, app);
 
-const messageFilePath = './messages.json';
+const messageFilePath = './conversations.json';
 const userFilePath = './users.json';
 const millisPerMinute = 60_000;
 
 const RestAPI = require('./rest-api/restApi');
-let messageAPI = new RestAPI(messageFilePath, true);
+let conversationAPI = new RestAPI(messageFilePath, true);
 let userAPI = new RestAPI(userFilePath, true);
 
 baseConversations = 
@@ -77,7 +77,63 @@ function saveConversations(conversations) {
     console.log(`Saving ${JSON.stringify(conversations)}`);
     fs.writeFileSync(messageFilePath, JSON.stringify(conversations));
   */
- messageAPI._saveData(conversations);
+ conversationAPI._saveData(conversations);
+}
+
+/* 
+  Most user requests require a username and sessionKey.
+  Check that the request has username and sessionKey fields and that they match an existing user.
+*/
+function validateUser(requestBody) {
+  if ('username' in requestBody && 'sessionKey' in requestBody) {
+    let users = userAPI.getAll().data;
+    for (index in users) {
+      let user = users[index];
+      if (user['username'] === requestBody['username'] && user['sessionKey'] === requestBody['sessionKey']) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function getUser(username) {
+  let users = userAPI.getAll().data;
+  for (let userIndex in users) {
+    console.log(`Checking ${username} against ${JSON.stringify(users[userIndex])}`);
+    if (users[userIndex]['username'] === username) {
+      return users[userIndex];
+    }
+  }
+  return undefined;
+}
+
+function getConversationCode(u1, u2) {
+  return [u1, u2].sort().join('-');
+}
+
+function isConversationUnique(conversationID) {
+  console.log(`isConversationUnique(${conversationID})`);
+  let conversations = conversationAPI.getAll().data;
+  for (conversationIndex in conversations) {
+    console.log(`\n${JSON.stringify(conversations[conversationIndex])} === ${conversationID}`);
+    if (Object.keys(conversations[conversationIndex])[0] === conversationID) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function getConversationByID(id) {
+  let conversations = conversationAPI.getAll().data;
+  for (let index in conversations) {
+    let conversation = conversations[index];
+    if (Object.keys(conversation)[0] === id) {
+      console.log(`Found ${JSON.stringify(conversation)}`);
+      return conversation;
+    }
+  }
+  return undefined;
 }
 
 app.get('/', function(req, res) {
@@ -89,16 +145,15 @@ app.get('/setConversations/', function(req, res) {
   return res.status(200).send();
 });
 
-app.get('/messages/all', function(req, res) {
-  console.log('/messages/all');
-  /*
-    return res.status(200).send(getAllConversations());
-  */
-  let result = messageAPI.getAll();
+app.get('/conversations/all', function(req, res) {
+  console.log('/conversations/all');
+  let result = conversationAPI.getAll();
   return res.status(result.status).send(result.data);
 });
 
-// http://localhost:3000/messages?conversation=A-B
+/*
+  Login required. Body must have 'username' and 'sessionKey'.
+*/
 app.get('/messages/:conversation', function(req, res) {
   
   if (req.params['conversation'] === undefined) {
@@ -109,11 +164,11 @@ app.get('/messages/:conversation', function(req, res) {
   let participantsCode = req.params['conversation'].split('-').sort().join('-');
   
   // let conversation = getConversation(participantsCode);
-  let conversationResult = messageAPI.get(participantsCode);
-  if (conversationResult.status === 200) {
-    return res.status(conversationResult.status).send(conversationResult.data);
+  let conversation = getConversationByID(participantsCode);
+  if (conversation === undefined) {
+    return res.status(400).send(JSON.stringify(`Conversation ${req.params['conversation']} not found`));
   } else {
-    return res.status(conversationResult.status).send(JSON.stringify(`Conversation ${req.params['conversation']} not found`));
+    return res.status(200).send(conversation);
   }
 
   /*
@@ -125,6 +180,9 @@ app.get('/messages/:conversation', function(req, res) {
   */
 });
 
+/*
+  Login required. Body must have 'username' and 'sessionKey'.
+*/
 app.post('/messages/add', jsonParser, function(req, res) {
   let j = req.body;
   let participantsCode = [j['sender'], j['receiver']].sort().join('-');
@@ -134,7 +192,47 @@ app.post('/messages/add', jsonParser, function(req, res) {
   return res.status(200).send(JSON.stringify(`Added message successfully`));
 });
 
+/*
+  Login required. Body must have 'username' and 'sessionKey'.
+  Add conversation - username, sessionKey, otherUsername
+*/
+app.post('/conversations/add', jsonParser, function(req, res) {
+  let j = req.body;
+  console.log('\n\nj:\n\n', j);
+  if (validateUser(j)) {
+    if ('otherUsername' in j) {
+      let thisUser = getUser(j['username']);
+      let otherUser = getUser(j['otherUsername']);
 
+      // Make sure the conversation does not already exist.
+      if (!isConversationUnique(getConversationCode(thisUser['username'], otherUser['username']))) {
+        return res.status(400).send(`A conversation with user ${otherUser['username']} already exists`);
+      }
+
+      if (thisUser !== undefined && otherUser !== undefined) {
+        let newConversation = {};
+        newConversation[thisUser['username']] = {};
+        newConversation[otherUser['username']] = {};
+        newConversation[thisUser['username']]['publicKey'] = thisUser['publicKey'];
+        newConversation[thisUser['username']]['messages'] = [];
+        newConversation[otherUser['username']]['publicKey'] = otherUser['publicKey'];
+        newConversation[otherUser['username']]['messages'] = [];
+        
+        let conversationCode = getConversationCode(thisUser['username'], otherUser['username']);
+        let indexedConversation = {};
+        indexedConversation[conversationCode] = newConversation;
+        conversationAPI.add(indexedConversation);
+        return res.status(200).send(indexedConversation);
+      } else {
+        return res.status(500).send("Unable to find this user or the other user");
+      }
+    } else {
+      return res.status(400).send("Invalid body for adding a conversation");
+    }
+  } else {
+    return res.status(400).send("You do not have access to this resource");
+  }
+});
 
 // --- User API calls ---
 

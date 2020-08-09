@@ -12,19 +12,15 @@ class Message {
 }
 
 const fs = require('fs');
-const key = fs.readFileSync('./key.pem');
-const cert = fs.readFileSync('./cert.pem');
 
 const express = require('express');
 const bodyParser = require('body-parser');
-const https = require('https');
 const cors = require('cors');
-
+const port = 3000;
 
 let app = express();
 app.use(cors());
 let jsonParser = bodyParser.json();
-const server = https.createServer({key: key, cert: cert }, app);
 
 const messageFilePath = './conversations.json';
 const userFilePath = './users.json';
@@ -49,27 +45,20 @@ baseConversations =
   ]
 };
 
-function getAllConversations() {
-  let text = fs.readFileSync(messageFilePath);
-  return JSON.parse(text);
-}
+function addMessage(conversationCode, message) {
+  
+  let allConversations = conversationAPI.getAll().data;
+  
+  console.log(`\n\n\nAdding ${JSON.stringify(message)} to ${conversationCode}\n\n\n`);
 
-function getConversation(conversation) {
-  let text = fs.readFileSync(messageFilePath);
-  let messages = JSON.parse(text);
-  return messages[conversation];
-}
-
-function addMessage(conversation, message) {
-  let allConversations = getAllConversations();
-  if (conversation in allConversations) {
-    allConversations[conversation].push(message);
-    console.log(`Adding ${JSON.stringify(message)} to ${conversation}`);
-  } else {
-    allConversations[conversation] = [message];
-    console.log(`Adding ${JSON.stringify(message)} to new ${conversation}`);
+  for (index in allConversations) {
+    if (Object.keys(allConversations[index]).includes(conversationCode)) {
+      let conversation = allConversations[index][conversationCode];
+      conversation['messages'].push(message);
+    }
   }
-  saveConversations(allConversations);
+
+  conversationAPI._saveData(allConversations);
 }
 
 function saveConversations(conversations) {
@@ -145,51 +134,63 @@ app.get('/setConversations/', function(req, res) {
   return res.status(200).send();
 });
 
-app.get('/conversations/all', function(req, res) {
-  console.log('/conversations/all');
-  let result = conversationAPI.getAll();
-  return res.status(result.status).send(result.data);
+/*
+  Login required. Body must have 'username' and 'sessionKey'.
+*/
+app.post('/conversations/all', jsonParser, function(req, res) {
+  let j = req.body;
+  if (validateUser(j)) {
+    console.log('/conversations/all');
+    let result = conversationAPI.getAll();
+    return res.status(result.status).send(result.data);
+  } else {
+    return res.status(400).send("You do not have access to this resource");
+  }
 });
 
 /*
   Login required. Body must have 'username' and 'sessionKey'.
+  Query arg 'conversationCode' = <u1>-<u2>.
 */
-app.get('/messages/:conversation', function(req, res) {
+app.post('/conversations/view', jsonParser, function(req, res) {
   
-  if (req.params['conversation'] === undefined) {
+  if (req.query['conversationCode'] === undefined) {
     return res.status(400).send();
   }
 
-  // Take participants and ensure the code is in sorted order for storage. E.g. C-A -> A-C
-  let participantsCode = req.params['conversation'].split('-').sort().join('-');
-  
-  // let conversation = getConversation(participantsCode);
-  let conversation = getConversationByID(participantsCode);
-  if (conversation === undefined) {
-    return res.status(400).send(JSON.stringify(`Conversation ${req.params['conversation']} not found`));
-  } else {
-    return res.status(200).send(conversation);
-  }
-
-  /*
-    if (conversation === undefined) {
-      return res.status(400).send(JSON.stringify(`Conversation ${req.params['conversation']} not found`));
-    }
+  let j = req.body;
+  if (validateUser(j)) {
+    // Take participants and ensure the code is in sorted order for storage. E.g. C-A -> A-C
+    let participantsCode = req.query['conversationCode'].split('-').sort().join('-');
     
-    return res.status(200).send(conversation);
-  */
+    // let conversation = getConversation(participantsCode);
+    let conversation = getConversationByID(participantsCode);
+    if (conversation === undefined) {
+      return res.status(400).send(JSON.stringify(`Conversation ${req.query['conversationCode']} not found`));
+    } else {
+      return res.status(200).send(conversation);
+    }
+  } else {
+    return res.status(400).send("You do not have access to this resource");
+  }
 });
 
 /*
   Login required. Body must have 'username' and 'sessionKey'.
+  Body also has 'message'.
 */
 app.post('/messages/add', jsonParser, function(req, res) {
   let j = req.body;
-  let participantsCode = [j['sender'], j['receiver']].sort().join('-');
-  console.log(`Adding message ${j} to conversation ${participantsCode}`);
-  addMessage(participantsCode, j);
+  if (validateUser(j)) {
+    let message = j['message'];
+    let participantsCode = [message['sender'], message['receiver']].sort().join('-');
+    console.log(`Adding message ${message} to conversation ${participantsCode}`);
+    addMessage(participantsCode, message);
 
-  return res.status(200).send(JSON.stringify(`Added message successfully`));
+    return res.status(200).send(JSON.stringify(`Added message successfully`));
+  } else {
+    return res.status(400).send("You do not have access to this resource");
+  }
 });
 
 /*
@@ -210,13 +211,14 @@ app.post('/conversations/add', jsonParser, function(req, res) {
       }
 
       if (thisUser !== undefined && otherUser !== undefined) {
-        let newConversation = {};
-        newConversation[thisUser['username']] = {};
-        newConversation[otherUser['username']] = {};
-        newConversation[thisUser['username']]['publicKey'] = thisUser['publicKey'];
-        newConversation[thisUser['username']]['messages'] = [];
-        newConversation[otherUser['username']]['publicKey'] = otherUser['publicKey'];
-        newConversation[otherUser['username']]['messages'] = [];
+        let keys = {};
+        keys[thisUser['username']] = thisUser['publicKey'];
+        keys[otherUser['username']] = otherUser['publicKey'];
+
+        let newConversation = {
+          publicKeys: keys,
+          messages: []
+        };
         
         let conversationCode = getConversationCode(thisUser['username'], otherUser['username']);
         let indexedConversation = {};
@@ -286,12 +288,7 @@ app.post('/users/login', jsonParser, function(req, res) {
   }
 });
 
-/*
-  this.sender = sender;
-  this.receiver = receiver;
-  this.timestamp = timestamp;
-  this.body = body;
-*/
 
-const port = 1443
-server.listen(port, () => { console.log('listening on ' + port) });
+app.listen(port, () => {
+  console.log(`Example app listening at http://localhost:${port}`)
+})

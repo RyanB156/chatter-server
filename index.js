@@ -1,17 +1,6 @@
 
 const crypto = require('crypto');
 
-class Message {
-  
-  constructor(sender, receiver, timestamp, body) {
-    this.sender = sender;
-    this.receiver = receiver;
-    this.timestamp = timestamp;
-    this.body = body;
-  }
-}
-
-const fs = require('fs');
 
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -27,23 +16,10 @@ const userFilePath = './users.json';
 const millisPerMinute = 60_000;
 
 const RestAPI = require('./rest-api/restApi');
-let conversationAPI = new RestAPI(messageFilePath, true);
-let userAPI = new RestAPI(userFilePath, true);
+let conversationAPI = new RestAPI(messageFilePath);
+let userAPI = new RestAPI(userFilePath);
 
-baseConversations = 
-  { 'A-C': [
-    new Message('A', 'C', new Date(Date.now() - 20 * millisPerMinute), 'Do you have the stuff?'),
-    new Message('C', 'A', new Date(Date.now() - 7.5 * millisPerMinute), 'I do. Are we still meeting under the bridge?'),
-    new Message('A', 'C', new Date(Date.now() - 0.3 * millisPerMinute), 'Yes. I will be there at sundown with you 5gs.'),
-  ],
-    'A-B': [
-    new Message('A', 'B', new Date(Date.now() - 10 * millisPerMinute), 'Hi! How are you doing?'),
-    new Message('B', 'A', new Date(Date.now() - 9 * millisPerMinute), 'Hey. I am doing well, how about you?'),
-    new Message('A', 'B', new Date(Date.now() - 5 * millisPerMinute), 'Good'),
-    new Message('A', 'B', new Date(Date.now() - 0.5 * millisPerMinute), 'Whatcha been up to?'),
-    new Message('B', 'A', new Date(Date.now() - 0.25 * millisPerMinute), 'I graduated from school with my Bachelor\'s in Computer Science and I just started a job with Honeywell in Raleigh, NC. Everything is going well so far. It\'s good to be starting my career.'),
-  ]
-};
+baseConversations = {};
 
 function addMessage(conversationCode, message) {
   
@@ -168,7 +144,22 @@ app.post('/conversations/view', jsonParser, function(req, res) {
     if (conversation === undefined) {
       return res.status(400).send(JSON.stringify(`Conversation ${req.query['conversationCode']} not found`));
     } else {
-      return res.status(200).send(conversation);
+      let timestamp = req.query['timestamp'];
+      if (timestamp === undefined) { // Return all messages.
+        console.log('\nundefined timestamp\n');
+        return res.status(200).send(conversation);
+      } else { // Return only new messages.
+        console.log(conversation);
+        let allMessages = conversation[participantsCode]['messages'];
+        let i = allMessages.findIndex(message => {
+          let messageTimestamp = new Date(message['timestamp']).toString();
+          return messageTimestamp >= timestamp;
+        });
+        console.log(typeof timestamp);
+        console.log(`\n\nFound last message at ${i}/${allMessages.length}`);
+        conversation[participantsCode]['messages'] = allMessages.slice(i+1, allMessages.length);
+        return res.status(200).send(conversation);
+      }
     }
   } else {
     return res.status(400).send("You do not have access to this resource");

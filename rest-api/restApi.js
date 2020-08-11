@@ -33,8 +33,8 @@ module.exports = class RestAPI {
     if (!fs.existsSync(this.dataPath)) {
       fs.writeFileSync(this.dataPath, JSON.stringify({}));
     }
-
-    console.log(`File ${dataPath} contains ${fs.readFileSync(this.dataPath)}`);
+    if (this.verbose)
+      console.log(`File ${dataPath} contains ${fs.readFileSync(this.dataPath)}`);
   }
 
   _saveData(data) {
@@ -53,7 +53,6 @@ module.exports = class RestAPI {
       if (this.verbose)
         console.log(`getAll - Loaded ${text}`);
 
-      console.log('\niterate over items');
       for (let item in items) {
         console.log(item);
       }
